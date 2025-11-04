@@ -196,12 +196,6 @@ function AppContent(): JSX.Element {
           return;
         }
 
-        if (normalizedExistingStatus === 'denied') {
-          setCameraPermissionStatus('denied');
-          setCameraError('Camera access was denied. Enable it in Settings.');
-          return;
-        }
-
         const requestedStatus = await Camera.requestDeviceCameraAuthorization();
 
         if (!isActive) {
