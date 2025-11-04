@@ -169,35 +169,54 @@ function AppContent(): JSX.Element {
 
     let isActive = true;
 
+    const normalizePermissionStatus = (status: unknown): 'granted' | 'denied' | 'unknown' => {
+      if (status === true || status === 'authorized' || status === 'granted') {
+        return 'granted';
+      }
+      if (status === false || status === 'denied' || status === 'restricted') {
+        return 'denied';
+      }
+      return 'unknown';
+    };
+
     const requestPermission = async () => {
       setIsRequestingCameraPermission(true);
       try {
-        const hasExistingPermission = await Camera.checkDeviceCameraAuthorizationStatus?.();
+        const existingStatus = await Camera.checkDeviceCameraAuthorizationStatus?.();
 
         if (!isActive) {
           return;
         }
 
-        if (hasExistingPermission) {
+        const normalizedExistingStatus = normalizePermissionStatus(existingStatus);
+
+        if (normalizedExistingStatus === 'granted') {
           setCameraError(null);
           setCameraPermissionStatus('granted');
           return;
         }
 
-        const isAuthorized = await Camera.requestDeviceCameraAuthorization();
+        if (normalizedExistingStatus === 'denied') {
+          setCameraPermissionStatus('denied');
+          setCameraError('Camera access was denied. Enable it in Settings.');
+          return;
+        }
+
+        const requestedStatus = await Camera.requestDeviceCameraAuthorization();
 
         if (!isActive) {
           return;
         }
 
-        if (isAuthorized) {
-          setCameraError(null);
-        }
-        setCameraPermissionStatus(isAuthorized ? 'granted' : 'denied');
+        const normalizedRequestedStatus = normalizePermissionStatus(requestedStatus);
 
-        if (!isAuthorized) {
+        if (normalizedRequestedStatus === 'granted') {
+          setCameraError(null);
+        } else if (normalizedRequestedStatus === 'denied') {
           setCameraError('Camera access was denied. Enable it in Settings.');
         }
+
+        setCameraPermissionStatus(normalizedRequestedStatus);
       } catch (error) {
         if (!isActive) {
           return;
