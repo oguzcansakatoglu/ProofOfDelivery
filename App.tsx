@@ -57,17 +57,22 @@ type Stroke = { id: number; points: Point[] };
 
 type SignaturePadProps = {
   theme: typeof lightTheme;
-  onSignatureChange?: (hasSignature: boolean) => void;
+  strokes: Stroke[];
+  onChange: (strokes: Stroke[]) => void;
 };
 
-function SignaturePad({ theme, onSignatureChange }: SignaturePadProps) {
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
+function SignaturePad({ theme, strokes, onChange }: SignaturePadProps) {
   const strokeId = useRef(0);
+  const strokesRef = useRef(strokes);
 
   useEffect(() => {
-    const hasSignature = strokes.some(stroke => stroke.points.length > 0);
-    onSignatureChange?.(hasSignature);
-  }, [strokes, onSignatureChange]);
+    strokesRef.current = strokes;
+  }, [strokes]);
+
+  useEffect(() => {
+    const maxId = strokes.reduce((max, stroke) => Math.max(max, stroke.id), 0);
+    strokeId.current = maxId;
+  }, [strokes]);
 
   const panResponder = useMemo(
     () =>
@@ -81,50 +86,125 @@ function SignaturePad({ theme, onSignatureChange }: SignaturePadProps) {
             id: strokeId.current,
             points: [{ x: locationX, y: locationY }],
           };
-          setStrokes(prev => [...prev, newStroke]);
+          onChange([...strokesRef.current, newStroke]);
         },
         onPanResponderMove: event => {
           const { locationX, locationY } = event.nativeEvent;
-          setStrokes(prev => {
-            if (prev.length === 0) {
-              return prev;
+          const current = strokesRef.current;
+          if (current.length === 0) {
+            return;
+          }
+          const updated = current.map((stroke, index) => {
+            if (index !== current.length - 1) {
+              return stroke;
             }
-            const updated = [...prev];
-            const currentStroke = updated[updated.length - 1];
-            updated[updated.length - 1] = {
-              ...currentStroke,
-              points: [...currentStroke.points, { x: locationX, y: locationY }],
+            return {
+              ...stroke,
+              points: [...stroke.points, { x: locationX, y: locationY }],
             };
-            return updated;
           });
+          onChange(updated);
         },
       }),
-    [],
+    [onChange],
   );
 
   const handleClear = () => {
-    setStrokes([]);
+    strokeId.current = 0;
+    onChange([]);
   };
 
   return (
-    <View>
+    <View style={styles.signaturePadContainer}>
       <View
         style={[styles.signatureCanvas, { backgroundColor: theme.background, borderColor: theme.border }]}
         {...panResponder.panHandlers}
       >
         {strokes.length === 0 ? (
-          <Text style={[styles.signaturePlaceholder, { color: theme.mutedText }]}>
+          <Text style={[styles.signaturePlaceholder, { color: theme.mutedText }]}> 
             Sign inside the box
           </Text>
         ) : null}
-        {strokes.map(stroke =>
-          stroke.points.map((point, index) => (
+        {strokes.map(stroke => {
+          if (stroke.points.length === 0) {
+            return null;
+          }
+
+          const strokeElements = [] as JSX.Element[];
+          const strokeWidth = 6;
+          const firstPoint = stroke.points[0];
+
+          strokeElements.push(
             <View
-              key={`${stroke.id}-${index}`}
-              style={[styles.signaturePoint, { backgroundColor: theme.text, left: point.x - 2, top: point.y - 2 }]}
-            />
-          )),
-        )}
+              key={`${stroke.id}-start`}
+              style={[
+                styles.signaturePoint,
+                {
+                  backgroundColor: theme.text,
+                  width: strokeWidth,
+                  height: strokeWidth,
+                  borderRadius: strokeWidth / 2,
+                  left: firstPoint.x - strokeWidth / 2,
+                  top: firstPoint.y - strokeWidth / 2,
+                },
+              ]}
+            />,
+          );
+
+          for (let i = 1; i < stroke.points.length; i += 1) {
+            const start = stroke.points[i - 1];
+            const end = stroke.points[i];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+
+            if (length === 0) {
+              continue;
+            }
+
+            const angle = Math.atan2(dy, dx);
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+
+            strokeElements.push(
+              <View
+                key={`${stroke.id}-${i}-segment`}
+                style={[
+                  styles.signatureSegment,
+                  {
+                    backgroundColor: theme.text,
+                    width: length,
+                    height: strokeWidth,
+                    borderRadius: strokeWidth / 2,
+                    left: midX - length / 2,
+                    top: midY - strokeWidth / 2,
+                    transform: [{ rotate: `${angle}rad` }],
+                  },
+                ]}
+              />,
+            );
+          }
+
+          const lastPoint = stroke.points[stroke.points.length - 1];
+          strokeElements.push(
+            <View
+              key={`${stroke.id}-end`}
+              style={[
+                styles.signaturePoint,
+                {
+                  backgroundColor: theme.text,
+                  width: strokeWidth,
+                  height: strokeWidth,
+                  borderRadius: strokeWidth / 2,
+                  left: lastPoint.x - strokeWidth / 2,
+                  top: lastPoint.y - strokeWidth / 2,
+                },
+              ]}
+            />,
+          );
+
+          return strokeElements;
+        })}
       </View>
       <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={handleClear}>
         <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Clear signature</Text>
@@ -142,7 +222,11 @@ function AppContent(): JSX.Element {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageModalVisible, setImageModalVisible] = useState(false);
-  const [hasSignature, setHasSignature] = useState(false);
+  const [isSignatureModalVisible, setSignatureModalVisible] = useState(false);
+  const [signatureStrokes, setSignatureStrokes] = useState<Stroke[]>([]);
+  const [draftSignatureStrokes, setDraftSignatureStrokes] = useState<Stroke[]>([]);
+
+  const hasSignature = signatureStrokes.some(stroke => stroke.points.length > 0);
 
   const openImageModal = () => {
     setImageUrlInput(imageUri ?? '');
@@ -162,6 +246,22 @@ function AppContent(): JSX.Element {
   const handleRemoveImage = () => {
     setImageUri(null);
   };
+
+  const openSignatureModal = () => {
+    setDraftSignatureStrokes(signatureStrokes);
+    setSignatureModalVisible(true);
+  };
+
+  const closeSignatureModal = () => {
+    setSignatureModalVisible(false);
+  };
+
+  const saveSignature = () => {
+    setSignatureStrokes(draftSignatureStrokes);
+    setSignatureModalVisible(false);
+  };
+
+  const signatureHasContent = draftSignatureStrokes.some(stroke => stroke.points.length > 0);
 
   return (
     <View
@@ -221,8 +321,18 @@ function AppContent(): JSX.Element {
 
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Signature</Text>
-          <Text style={[styles.signatureHint, { color: theme.mutedText }]}>Use your finger to sign below.</Text>
-          <SignaturePad theme={theme} onSignatureChange={setHasSignature} />
+          <Text style={[styles.signatureHint, { color: theme.mutedText }]}>Capture a full-screen signature.</Text>
+          <Pressable
+            onPress={openSignatureModal}
+            style={[styles.primaryButton, { backgroundColor: theme.accent }]}
+          >
+            <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>
+              {hasSignature ? 'Edit signature' : 'Capture signature'}
+            </Text>
+          </Pressable>
+          <Text style={[styles.signatureStatus, { color: hasSignature ? theme.text : theme.mutedText }]}> 
+            {hasSignature ? 'Signature captured' : 'No signature captured'}
+          </Text>
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -256,14 +366,56 @@ function AppContent(): JSX.Element {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <View style={styles.modalButtons}>
-              <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
-                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={confirmImageSelection}>
-                <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Attach</Text>
-              </Pressable>
-            </View>
+          <View style={styles.modalButtons}>
+            <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
+              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={confirmImageSelection}>
+              <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Attach</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+
+      <Modal
+        visible={isSignatureModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closeSignatureModal}
+      >
+        <View
+          style={[
+            styles.signatureModalContainer,
+            {
+              backgroundColor: theme.background,
+              paddingTop: safeAreaInsets.top + 16,
+              paddingBottom: safeAreaInsets.bottom + 24,
+            },
+          ]}
+        >
+          <View style={styles.signatureModalHeader}>
+            <Pressable onPress={closeSignatureModal}>
+              <Text style={[styles.signatureModalAction, { color: theme.mutedText }]}>Cancel</Text>
+            </Pressable>
+            <Text style={[styles.signatureModalTitle, { color: theme.text }]}>Capture signature</Text>
+            <Pressable onPress={saveSignature}>
+              <Text
+                style={[
+                  styles.signatureModalAction,
+                  {
+                    color: theme.accent,
+                    opacity: signatureHasContent ? 1 : 0.5,
+                  },
+                ]}
+              >
+                Save
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.signatureModalBody}>
+            <Text style={[styles.signatureHint, { color: theme.mutedText }]}>Use your finger to sign below.</Text>
+            <SignaturePad theme={theme} strokes={draftSignatureStrokes} onChange={setDraftSignatureStrokes} />
           </View>
         </View>
       </Modal>
@@ -318,6 +470,9 @@ const styles = StyleSheet.create({
   signatureHint: {
     fontSize: 14,
   },
+  signatureStatus: {
+    fontSize: 14,
+  },
   primaryButton: {
     borderRadius: 999,
     paddingHorizontal: 16,
@@ -362,8 +517,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  signaturePadContainer: {
+    flex: 1,
+    gap: 12,
+    width: '100%',
+  },
   signatureCanvas: {
-    height: 160,
+    flex: 1,
     borderWidth: 1,
     borderRadius: 12,
     overflow: 'hidden',
@@ -375,9 +535,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   signaturePoint: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    position: 'absolute',
+  },
+  signatureSegment: {
     position: 'absolute',
   },
   modalOverlay: {
@@ -412,6 +572,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  signatureModalContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    gap: 24,
+  },
+  signatureModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  signatureModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  signatureModalAction: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signatureModalBody: {
+    flex: 1,
+    gap: 16,
   },
 });
 
