@@ -2,7 +2,6 @@
  * Proof of Delivery single page application.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -17,11 +16,12 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
+import { Camera, CameraType } from 'react-native-camera-kit';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import { Camera, CameraType } from 'react-native-camera-kit';
 
 const lightTheme = {
   background: '#f4f6fb',
@@ -172,39 +172,59 @@ function AppContent(): JSX.Element {
     const requestPermission = async () => {
       setIsRequestingCameraPermission(true);
       try {
-        const hasExistingPermission = await Camera.checkDeviceCameraAuthorizationStatus?.();
+        // Check if permission methods exist
+        if (typeof Camera.requestDeviceCameraAuthorization !== 'function') {
+          // If methods don't exist, assume we have permission and let the Camera component handle it
+          if (isActive) {
+            setCameraPermissionStatus('granted');
+            setCameraError(null);
+            setIsRequestingCameraPermission(false);
+          }
+          return;
+        }
+
+        // Check existing permission status
+        let existingStatus;
+        if (typeof Camera.checkDeviceCameraAuthorizationStatus === 'function') {
+          existingStatus = await Camera.checkDeviceCameraAuthorizationStatus();
+        }
 
         if (!isActive) {
           return;
         }
 
-        if (hasExistingPermission) {
+        // If already granted, we're done
+        if (existingStatus === true || existingStatus === 'authorized' || existingStatus === 'granted') {
           setCameraError(null);
           setCameraPermissionStatus('granted');
+          setIsRequestingCameraPermission(false);
           return;
         }
 
-        const isAuthorized = await Camera.requestDeviceCameraAuthorization();
+        // Request permission
+        const requestedStatus = await Camera.requestDeviceCameraAuthorization();
 
         if (!isActive) {
           return;
         }
 
-        if (isAuthorized) {
+        // Handle the response
+        if (requestedStatus === true || requestedStatus === 'authorized' || requestedStatus === 'granted') {
           setCameraError(null);
-        }
-        setCameraPermissionStatus(isAuthorized ? 'granted' : 'denied');
-
-        if (!isAuthorized) {
+          setCameraPermissionStatus('granted');
+        } else {
           setCameraError('Camera access was denied. Enable it in Settings.');
+          setCameraPermissionStatus('denied');
         }
       } catch (error) {
         if (!isActive) {
           return;
         }
 
-        setCameraPermissionStatus('denied');
-        setCameraError('Unable to access the camera.');
+        console.error('Camera permission error:', error);
+        // On error, try to show camera anyway - it might handle permissions itself
+        setCameraPermissionStatus('granted');
+        setCameraError(null);
       } finally {
         if (isActive) {
           setIsRequestingCameraPermission(false);
