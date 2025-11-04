@@ -2,8 +2,9 @@
  * Proof of Delivery single page application.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   PanResponder,
@@ -20,6 +21,7 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
+import { Camera, CameraType } from 'react-native-camera-kit';
 
 const lightTheme = {
   background: '#f4f6fb',
@@ -140,24 +142,50 @@ function AppContent(): JSX.Element {
 
   const [note, setNote] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [isRequestingCameraPermission, setIsRequestingCameraPermission] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasSignature, setHasSignature] = useState(false);
+  const cameraRef = useRef<Camera | null>(null);
 
-  const openImageModal = () => {
-    setImageUrlInput(imageUri ?? '');
-    setImageModalVisible(true);
-  };
+  const openImageModal = useCallback(async () => {
+    setCameraError(null);
+    setIsRequestingCameraPermission(true);
+    try {
+      const isAuthorized = await Camera.requestDeviceCameraAuthorization();
+      setCameraPermissionStatus(isAuthorized ? 'granted' : 'denied');
+    } catch (error) {
+      setCameraPermissionStatus('denied');
+      setCameraError('Unable to access the camera.');
+    } finally {
+      setIsRequestingCameraPermission(false);
+      setImageModalVisible(true);
+    }
+  }, []);
 
   const closeImageModal = () => {
     setImageModalVisible(false);
+    setCameraPermissionStatus('unknown');
+    setCameraError(null);
+    setIsRequestingCameraPermission(false);
   };
 
-  const confirmImageSelection = () => {
-    const trimmed = imageUrlInput.trim();
-    setImageUri(trimmed.length > 0 ? trimmed : null);
-    setImageModalVisible(false);
-  };
+  const handleCapturePhoto = useCallback(async () => {
+    try {
+      const capturedImage = await cameraRef.current?.capture?.();
+      if (capturedImage?.uri) {
+        setImageUri(capturedImage.uri);
+        setImageModalVisible(false);
+        setCameraPermissionStatus('unknown');
+        setCameraError(null);
+      } else {
+        setCameraError('No image data was returned.');
+      }
+    } catch (error) {
+      setCameraError('Failed to capture photo. Please try again.');
+    }
+  }, []);
 
   const handleRemoveImage = () => {
     setImageUri(null);
@@ -198,7 +226,9 @@ function AppContent(): JSX.Element {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Photo attachment</Text>
             <Pressable
-              onPress={openImageModal}
+              onPress={() => {
+                void openImageModal();
+              }}
               style={[styles.primaryButton, { backgroundColor: theme.accent }]}
             >
               <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>
@@ -244,26 +274,51 @@ function AppContent(): JSX.Element {
 
       <Modal visible={isImageModalVisible} animationType="fade" transparent onRequestClose={closeImageModal}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.card }]}> 
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Attach image</Text>
-            <Text style={[styles.modalDescription, { color: theme.mutedText }]}>Paste an image URL to attach it to this proof.</Text>
-            <TextInput
-              value={imageUrlInput}
-              onChangeText={setImageUrlInput}
-              placeholder="https://example.com/photo.jpg"
-              placeholderTextColor={theme.mutedText}
-              style={[styles.modalInput, { color: theme.text, borderColor: theme.border }]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <View style={styles.modalButtons}>
-              <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
-                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={confirmImageSelection}>
-                <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Attach</Text>
-              </Pressable>
-            </View>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Capture photo</Text>
+            <Text style={[styles.modalDescription, { color: theme.mutedText }]}>Use your camera to attach a proof-of-delivery photo.</Text>
+
+            {isRequestingCameraPermission ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={theme.accent} />
+                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Requesting camera access…</Text>
+              </View>
+            ) : cameraPermissionStatus === 'granted' ? (
+              <>
+                <View style={[styles.cameraPreviewWrapper, { borderColor: theme.border }]}>
+                  <Camera ref={cameraRef} style={styles.cameraPreview} cameraType={CameraType.Back} />
+                </View>
+                {cameraError ? (
+                  <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
+                ) : null}
+                <View style={styles.modalButtons}>
+                  <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
+                    <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.primaryButton, { backgroundColor: theme.accent }]}
+                    onPress={() => {
+                      void handleCapturePhoto();
+                    }}
+                  >
+                    <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Capture</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Camera access is required to capture a delivery photo.</Text>
+                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Enable permissions in your device settings and try again.</Text>
+                {cameraError ? (
+                  <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
+                ) : null}
+                <View style={styles.modalButtons}>
+                  <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
+                    <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Close</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -389,7 +444,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '100%',
-    maxWidth: 360,
+    maxWidth: 380,
     borderRadius: 20,
     padding: 20,
     gap: 16,
@@ -401,17 +456,34 @@ const styles = StyleSheet.create({
   modalDescription: {
     fontSize: 14,
   },
-  modalInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
   modalButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: 12,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 24,
+  },
+  permissionMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  cameraPreviewWrapper: {
+    borderWidth: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    height: 360,
+    backgroundColor: '#000',
+  },
+  cameraPreview: {
+    flex: 1,
+    width: '100%',
+  },
+  cameraErrorText: {
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
 
