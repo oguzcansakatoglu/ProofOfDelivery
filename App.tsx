@@ -61,6 +61,48 @@ type SignaturePadProps = {
   onChange: (strokes: Stroke[]) => void;
 };
 
+const SMOOTHING_RESOLUTION = 6;
+
+const smoothStrokePoints = (points: Point[]): Point[] => {
+  if (points.length < 3) {
+    return points;
+  }
+
+  const extendedPoints = [points[0], ...points, points[points.length - 1]];
+  const smoothed: Point[] = [points[0]];
+
+  for (let i = 1; i < extendedPoints.length - 2; i += 1) {
+    const p0 = extendedPoints[i - 1];
+    const p1 = extendedPoints[i];
+    const p2 = extendedPoints[i + 1];
+    const p3 = extendedPoints[i + 2];
+
+    for (let step = 1; step <= SMOOTHING_RESOLUTION; step += 1) {
+      const t = step / SMOOTHING_RESOLUTION;
+      const t2 = t * t;
+      const t3 = t2 * t;
+
+      const x =
+        0.5 *
+        ((2 * p1.x) +
+          (-p0.x + p2.x) * t +
+          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+      const y =
+        0.5 *
+        ((2 * p1.y) +
+          (-p0.y + p2.y) * t +
+          (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+          (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+
+      smoothed.push({ x, y });
+    }
+  }
+
+  smoothed.push(points[points.length - 1]);
+  return smoothed;
+};
+
 function SignaturePad({ theme, strokes, onChange }: SignaturePadProps) {
   const strokeId = useRef(0);
   const strokesRef = useRef(strokes);
@@ -131,8 +173,9 @@ function SignaturePad({ theme, strokes, onChange }: SignaturePadProps) {
           }
 
           const strokeElements = [] as JSX.Element[];
-          const strokeWidth = 6;
-          const firstPoint = stroke.points[0];
+          const strokeWidth = 4;
+          const smoothedPoints = smoothStrokePoints(stroke.points);
+          const firstPoint = smoothedPoints[0];
 
           strokeElements.push(
             <View
@@ -151,9 +194,9 @@ function SignaturePad({ theme, strokes, onChange }: SignaturePadProps) {
             />,
           );
 
-          for (let i = 1; i < stroke.points.length; i += 1) {
-            const start = stroke.points[i - 1];
-            const end = stroke.points[i];
+          for (let i = 1; i < smoothedPoints.length; i += 1) {
+            const start = smoothedPoints[i - 1];
+            const end = smoothedPoints[i];
             const dx = end.x - start.x;
             const dy = end.y - start.y;
             const length = Math.sqrt(dx * dx + dy * dy);
@@ -185,7 +228,7 @@ function SignaturePad({ theme, strokes, onChange }: SignaturePadProps) {
             );
           }
 
-          const lastPoint = stroke.points[stroke.points.length - 1];
+          const lastPoint = smoothedPoints[smoothedPoints.length - 1];
           strokeElements.push(
             <View
               key={`${stroke.id}-end`}
@@ -225,6 +268,8 @@ function AppContent(): JSX.Element {
   const [isSignatureModalVisible, setSignatureModalVisible] = useState(false);
   const [signatureStrokes, setSignatureStrokes] = useState<Stroke[]>([]);
   const [draftSignatureStrokes, setDraftSignatureStrokes] = useState<Stroke[]>([]);
+  const [signatureName, setSignatureName] = useState('');
+  const [draftSignatureName, setDraftSignatureName] = useState('');
 
   const hasSignature = signatureStrokes.some(stroke => stroke.points.length > 0);
 
@@ -249,6 +294,7 @@ function AppContent(): JSX.Element {
 
   const openSignatureModal = () => {
     setDraftSignatureStrokes(signatureStrokes);
+    setDraftSignatureName(signatureName);
     setSignatureModalVisible(true);
   };
 
@@ -258,11 +304,12 @@ function AppContent(): JSX.Element {
 
   const saveSignature = () => {
     setSignatureStrokes(draftSignatureStrokes);
+    setSignatureName(draftSignatureName.trim());
     setSignatureModalVisible(false);
   };
 
   const signatureHasContent = draftSignatureStrokes.some(stroke => stroke.points.length > 0);
-
+  
   return (
     <View
       style={[
@@ -349,6 +396,12 @@ function AppContent(): JSX.Element {
             <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>Signature captured</Text>
             <Text style={[styles.summaryValue, { color: theme.text }]}>{hasSignature ? 'Yes' : 'No'}</Text>
           </View>
+          <View style={styles.summaryRow}>
+            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>Signature name</Text>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>
+              {signatureName.length > 0 ? signatureName : 'Not provided'}
+            </Text>
+          </View>
         </View>
       </ScrollView>
 
@@ -415,6 +468,13 @@ function AppContent(): JSX.Element {
           </View>
           <View style={styles.signatureModalBody}>
             <Text style={[styles.signatureHint, { color: theme.mutedText }]}>Use your finger to sign below.</Text>
+            <TextInput
+              value={draftSignatureName}
+              onChangeText={setDraftSignatureName}
+              placeholder="Signer name"
+              placeholderTextColor={theme.mutedText}
+              style={[styles.signatureNameInput, { color: theme.text, borderColor: theme.border }]}
+            />
             <SignaturePad theme={theme} strokes={draftSignatureStrokes} onChange={setDraftSignatureStrokes} />
           </View>
         </View>
@@ -594,6 +654,13 @@ const styles = StyleSheet.create({
   signatureModalBody: {
     flex: 1,
     gap: 16,
+  },
+  signatureNameInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
   },
 });
 
