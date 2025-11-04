@@ -149,19 +149,10 @@ function AppContent(): JSX.Element {
   const [hasSignature, setHasSignature] = useState(false);
   const cameraRef = useRef<Camera | null>(null);
 
-  const openImageModal = useCallback(async () => {
+  const openImageModal = useCallback(() => {
     setCameraError(null);
-    setIsRequestingCameraPermission(true);
-    try {
-      const isAuthorized = await Camera.requestDeviceCameraAuthorization();
-      setCameraPermissionStatus(isAuthorized ? 'granted' : 'denied');
-    } catch (error) {
-      setCameraPermissionStatus('denied');
-      setCameraError('Unable to access the camera.');
-    } finally {
-      setIsRequestingCameraPermission(false);
-      setImageModalVisible(true);
-    }
+    setCameraPermissionStatus('unknown');
+    setImageModalVisible(true);
   }, []);
 
   const closeImageModal = () => {
@@ -170,6 +161,63 @@ function AppContent(): JSX.Element {
     setCameraError(null);
     setIsRequestingCameraPermission(false);
   };
+
+  useEffect(() => {
+    if (!isImageModalVisible) {
+      return;
+    }
+
+    let isActive = true;
+
+    const requestPermission = async () => {
+      setIsRequestingCameraPermission(true);
+      try {
+        const hasExistingPermission = await Camera.checkDeviceCameraAuthorizationStatus?.();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (hasExistingPermission) {
+          setCameraError(null);
+          setCameraPermissionStatus('granted');
+          return;
+        }
+
+        const isAuthorized = await Camera.requestDeviceCameraAuthorization();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (isAuthorized) {
+          setCameraError(null);
+        }
+        setCameraPermissionStatus(isAuthorized ? 'granted' : 'denied');
+
+        if (!isAuthorized) {
+          setCameraError('Camera access was denied. Enable it in Settings.');
+        }
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setCameraPermissionStatus('denied');
+        setCameraError('Unable to access the camera.');
+      } finally {
+        if (isActive) {
+          setIsRequestingCameraPermission(false);
+        }
+      }
+    };
+
+    void requestPermission();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isImageModalVisible]);
 
   const handleCapturePhoto = useCallback(async () => {
     try {
