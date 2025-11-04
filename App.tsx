@@ -340,55 +340,59 @@ function AppContent(): JSX.Element {
         </View>
       </ScrollView>
 
-      <Modal visible={isImageModalVisible} animationType="fade" transparent onRequestClose={closeImageModal}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Capture photo</Text>
-            <Text style={[styles.modalDescription, { color: theme.mutedText }]}>Use your camera to attach a proof-of-delivery photo.</Text>
-
-            {isRequestingCameraPermission ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={theme.accent} />
-                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Requesting camera access…</Text>
-              </View>
-            ) : cameraPermissionStatus === 'granted' ? (
-              <>
-                <View style={[styles.cameraPreviewWrapper, { borderColor: theme.border }]}>
-                  <Camera ref={cameraRef} style={styles.cameraPreview} cameraType={CameraType.Back} />
-                </View>
-                {cameraError ? (
-                  <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
-                ) : null}
-                <View style={styles.modalButtons}>
-                  <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
-                    <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.primaryButton, { backgroundColor: theme.accent }]}
-                    onPress={() => {
-                      void handleCapturePhoto();
-                    }}
-                  >
-                    <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Capture</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Camera access is required to capture a delivery photo.</Text>
-                <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Enable permissions in your device settings and try again.</Text>
-                {cameraError ? (
-                  <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
-                ) : null}
-                <View style={styles.modalButtons}>
-                  <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={closeImageModal}>
-                    <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Close</Text>
-                  </Pressable>
-                </View>
-              </>
-            )}
+      <Modal visible={isImageModalVisible} animationType="fade" onRequestClose={closeImageModal} statusBarTranslucent>
+        {isRequestingCameraPermission ? (
+          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={theme.accent} />
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Requesting camera access…</Text>
+            </View>
           </View>
-        </View>
+        ) : cameraPermissionStatus === 'granted' ? (
+          <View style={styles.fullScreenContainer}>
+            <Camera ref={cameraRef} style={styles.fullScreenCamera} cameraType={CameraType.Back} />
+            <View style={styles.cameraOverlay}>
+              <View style={styles.cameraTopBar}>
+                {cameraError ? (
+                  <View style={[styles.errorBanner, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
+                    <Text style={[styles.cameraErrorText, { color: '#ffffff' }]}>{cameraError}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <View style={[styles.cameraBottomBar, { paddingBottom: safeAreaInsets.bottom + 20 }]}>
+                <Pressable 
+                  style={[styles.cameraNativeButton, { backgroundColor: 'rgba(0,0,0,0.4)' }]} 
+                  onPress={closeImageModal}
+                >
+                  <Text style={styles.cameraNativeButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.captureButtonNative}
+                  onPress={() => {
+                    void handleCapturePhoto();
+                  }}
+                >
+                  <View style={styles.captureButtonInner} />
+                </Pressable>
+                <View style={styles.cameraNativeButton} />
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
+            <View style={[styles.permissionDeniedContainer, { backgroundColor: theme.card }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Camera Access Required</Text>
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Camera access is required to capture a delivery photo.</Text>
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Enable permissions in your device settings and try again.</Text>
+              {cameraError ? (
+                <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
+              ) : null}
+              <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={closeImageModal}>
+                <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
       </Modal>
     </View>
   );
@@ -503,31 +507,75 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     position: 'absolute',
   },
-  modalOverlay: {
+  fullScreenContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: '#000',
+  },
+  fullScreenCamera: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
+  cameraTopBar: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+  },
+  errorBanner: {
+    padding: 12,
+    borderRadius: 8,
+  },
+  cameraBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+  },
+  cameraNativeButton: {
+    width: 80,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    borderRadius: 8,
   },
-  modalContent: {
-    width: '100%',
-    maxWidth: 380,
+  cameraNativeButtonText: {
+    color: '#ffffff',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  captureButtonNative: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#ffffff',
+  },
+  captureButtonInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#ffffff',
+  },
+  permissionDeniedContainer: {
+    margin: 24,
+    padding: 24,
     borderRadius: 20,
-    padding: 20,
     gap: 16,
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-  },
-  modalDescription: {
-    fontSize: 14,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
   },
   loadingContainer: {
     alignItems: 'center',
@@ -538,21 +586,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  cameraPreviewWrapper: {
-    borderWidth: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    height: 360,
-    backgroundColor: '#000',
-  },
-  cameraPreview: {
-    flex: 1,
-    width: '100%',
-  },
   cameraErrorText: {
     fontSize: 14,
     textAlign: 'center',
   },
 });
-
 export default App;
