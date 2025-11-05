@@ -15,9 +15,14 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
-import React, { useMemo, useRef, useState } from 'react';
 import { Camera, CameraType } from 'react-native-camera-kit';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
@@ -56,16 +61,26 @@ function App(): JSX.Element {
   );
 }
 
- 
-
 function AppContent(): JSX.Element {
   const safeAreaInsets = useSafeAreaInsets();
   const isDarkMode = useColorScheme() === 'dark';
   const theme = isDarkMode ? darkTheme : lightTheme;
 
+  // main state
   const [note, setNote] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
+
+  // image / camera modal
   const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<
+    'unknown' | 'granted' | 'denied'
+  >('unknown');
+  const [isRequestingCameraPermission, setIsRequestingCameraPermission] =
+    useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const cameraRef = useRef<Camera | null>(null);
+
+  // signature modal
   const [isSignatureModalVisible, setSignatureModalVisible] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [draftSignatureData, setDraftSignatureData] = useState<string | null>(
@@ -73,18 +88,23 @@ function AppContent(): JSX.Element {
   );
   const [signatureName, setSignatureName] = useState('');
   const [draftSignatureName, setDraftSignatureName] = useState('');
-
   const [signatureKey, setSignatureKey] = useState(0);
+
+  // signature pad helpers
+  const [isLoadingSignature, setIsLoadingSignature] = useState(false);
+  const signatureRef = useRef<SignatureCanvas | null>(null);
 
   const hasSignature = useMemo(
     () => Boolean(signatureData && signatureData.length > 0),
     [signatureData],
   );
-  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'unknown' | 'granted' | 'denied'>('unknown');
-  const [isRequestingCameraPermission, setIsRequestingCameraPermission] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [hasSignature, setHasSignature] = useState(false);
-  const cameraRef = useRef<Camera | null>(null);
+
+  const signatureHasContent = useMemo(
+    () => Boolean(draftSignatureData && draftSignatureData.length > 0),
+    [draftSignatureData],
+  );
+
+  // IMAGE MODAL HANDLERS
 
   const openImageModal = useCallback(() => {
     setCameraError(null);
@@ -92,26 +112,24 @@ function AppContent(): JSX.Element {
     setImageModalVisible(true);
   }, []);
 
-  const closeImageModal = () => {
+  const closeImageModal = useCallback(() => {
     setImageModalVisible(false);
     setCameraPermissionStatus('unknown');
     setCameraError(null);
     setIsRequestingCameraPermission(false);
-  };
+  }, []);
 
   useEffect(() => {
-    if (!isImageModalVisible) {
-      return;
-    }
+    if (!isImageModalVisible) return;
 
     let isActive = true;
 
     const requestPermission = async () => {
       setIsRequestingCameraPermission(true);
       try {
-        // Check if permission methods exist
+        // Some versions of react-native-camera-kit expose these helpers, some don't
+        // If they don't, we just let the camera handle it.
         if (typeof Camera.requestDeviceCameraAuthorization !== 'function') {
-          // If methods don't exist, assume we have permission and let the Camera component handle it
           if (isActive) {
             setCameraPermissionStatus('granted');
             setCameraError(null);
@@ -120,48 +138,47 @@ function AppContent(): JSX.Element {
           return;
         }
 
-        // Check existing permission status
-        let existingStatus;
-        if (typeof Camera.checkDeviceCameraAuthorizationStatus === 'function') {
+        let existingStatus: any;
+        if (
+          typeof Camera.checkDeviceCameraAuthorizationStatus === 'function'
+        ) {
           existingStatus = await Camera.checkDeviceCameraAuthorizationStatus();
         }
 
-        if (!isActive) {
-          return;
-        }
+        if (!isActive) return;
 
-        // If already granted, we're done
-        if (existingStatus === true || existingStatus === 'authorized' || existingStatus === 'granted') {
-          setCameraError(null);
+        if (
+          existingStatus === true ||
+          existingStatus === 'authorized' ||
+          existingStatus === 'granted'
+        ) {
           setCameraPermissionStatus('granted');
+          setCameraError(null);
           setIsRequestingCameraPermission(false);
           return;
         }
 
-        // Request permission
         const requestedStatus = await Camera.requestDeviceCameraAuthorization();
+        if (!isActive) return;
 
-        if (!isActive) {
-          return;
-        }
-
-        // Handle the response
-        if (requestedStatus === true || requestedStatus === 'authorized' || requestedStatus === 'granted') {
-          setCameraError(null);
+        if (
+          requestedStatus === true ||
+          requestedStatus === 'authorized' ||
+          requestedStatus === 'granted'
+        ) {
           setCameraPermissionStatus('granted');
+          setCameraError(null);
         } else {
-          setCameraError('Camera access was denied. Enable it in Settings.');
           setCameraPermissionStatus('denied');
+          setCameraError('Camera access was denied. Enable it in Settings.');
         }
       } catch (error) {
-        if (!isActive) {
-          return;
+        console.warn('Camera permission error:', error);
+        // fall back to try showing camera
+        if (isActive) {
+          setCameraPermissionStatus('granted');
+          setCameraError(null);
         }
-
-        console.error('Camera permission error:', error);
-        // On error, try to show camera anyway - it might handle permissions itself
-        setCameraPermissionStatus('granted');
-        setCameraError(null);
       } finally {
         if (isActive) {
           setIsRequestingCameraPermission(false);
@@ -181,80 +198,67 @@ function AppContent(): JSX.Element {
       const capturedImage = await cameraRef.current?.capture?.();
       if (capturedImage?.uri) {
         setImageUri(capturedImage.uri);
-        setImageModalVisible(false);
-        setCameraPermissionStatus('unknown');
-        setCameraError(null);
+        closeImageModal();
       } else {
         setCameraError('No image data was returned.');
       }
     } catch (error) {
+      console.warn(error);
       setCameraError('Failed to capture photo. Please try again.');
     }
+  }, [closeImageModal]);
+
+  const handleRemoveImage = useCallback(() => {
+    setImageUri(null);
   }, []);
 
-  const handleRemoveImage = () => {
-    setImageUri(null);
-  };
+  // SIGNATURE HANDLERS
 
-  const openSignatureModal = () => {
+  const openSignatureModal = useCallback(() => {
     setDraftSignatureData(signatureData);
     setDraftSignatureName(signatureName);
     setSignatureModalVisible(true);
-  };
+  }, [signatureData, signatureName]);
 
-  const closeSignatureModal = () => {
+  const closeSignatureModal = useCallback(() => {
     setSignatureModalVisible(false);
-  };
+  }, []);
 
-  const saveSignature = () => {
-    if (!draftSignatureData || draftSignatureData.length === 0) {
-      return;
-    }
-
+  const saveSignature = useCallback(() => {
+    if (!draftSignatureData || draftSignatureData.length === 0) return;
     setSignatureData(draftSignatureData);
     setSignatureName(draftSignatureName.trim());
     setSignatureModalVisible(false);
-  };
+  }, [draftSignatureData, draftSignatureName]);
 
-  const signatureHasContent = useMemo(
-    () => Boolean(draftSignatureData && draftSignatureData.length > 0),
-    [draftSignatureData],
-  );
-
-   
- 
-
-  const [isLoading, setIsLoading] = useState(false);
-  const ref = useRef();
-
-  const handleSignature = (signature) => {
-    console.log('Signature captured:', signature);
+  const handleSignature = useCallback((signature: string) => {
+    // signature is base64 data url
     setDraftSignatureData(signature);
-    setIsLoading(false);
-  };
+    setIsLoadingSignature(false);
+  }, []);
 
-  const handleEmpty = () => {
-    console.log('Signature is empty');
+  const handleEmpty = useCallback(() => {
     setDraftSignatureData(null);
-    setIsLoading(false);
-  };
+    setIsLoadingSignature(false);
+  }, []);
 
-  const handleClear = () => {
-    console.log('Signature cleared');
+  const handleClear = useCallback(() => {
     setDraftSignatureData(null);
-    setIsLoading(false);
-    setSignatureKey(prev => prev + 1); // Force remount
-  };
+    setIsLoadingSignature(false);
+    // force remount to clear
+    setSignatureKey(prev => prev + 1);
+  }, []);
 
-  const handleError = (error) => {
-    console.error('Signature pad error:', error);
-    setIsLoading(false);
-  };
+  const handleError = useCallback((error: unknown) => {
+    console.warn('Signature pad error:', error);
+    setIsLoadingSignature(false);
+  }, []);
 
-  const handleEnd = () => {
-    setIsLoading(true);
-    ref.current?.readSignature();
-  };
+  const handleEnd = useCallback(() => {
+    // user finished drawing
+    setIsLoadingSignature(true);
+    signatureRef.current?.readSignature?.();
+  }, []);
 
   return (
     <View
@@ -279,6 +283,7 @@ function AppContent(): JSX.Element {
           Capture a note, photo, or signature
         </Text>
 
+        {/* Note */}
         <View
           style={[
             styles.card,
@@ -298,6 +303,7 @@ function AppContent(): JSX.Element {
           />
         </View>
 
+        {/* Photo attachment */}
         <View
           style={[
             styles.card,
@@ -309,9 +315,7 @@ function AppContent(): JSX.Element {
               Photo attachment
             </Text>
             <Pressable
-              onPress={() => {
-                void openImageModal();
-              }}
+              onPress={openImageModal}
               style={[styles.primaryButton, { backgroundColor: theme.accent }]}
             >
               <Text
@@ -347,6 +351,7 @@ function AppContent(): JSX.Element {
           )}
         </View>
 
+        {/* Signature */}
         <View
           style={[
             styles.card,
@@ -382,13 +387,14 @@ function AppContent(): JSX.Element {
               source={{ uri: signatureData }}
               style={[
                 styles.signaturePreview,
-                { borderColor: theme.border, backgroundColor: "white" },
+                { borderColor: theme.border, backgroundColor: 'white' },
               ]}
               resizeMode="contain"
             />
           ) : null}
         </View>
 
+        {/* Summary */}
         <View
           style={[
             styles.card,
@@ -433,80 +439,64 @@ function AppContent(): JSX.Element {
         </View>
       </ScrollView>
 
+      {/* IMAGE / CAMERA MODAL */}
       <Modal
         visible={isImageModalVisible}
         animationType="fade"
-        transparent
         onRequestClose={closeImageModal}
+        statusBarTranslucent
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>
-              Attach image
-            </Text>
-            <Text style={[styles.modalDescription, { color: theme.mutedText }]}>
-              Paste an image URL to attach it to this proof.
-            </Text>
-            <TextInput
-              value={imageUrlInput}
-              onChangeText={setImageUrlInput}
-              placeholder="https://example.com/photo.jpg"
-              placeholderTextColor={theme.mutedText}
-              style={[
-                styles.modalInput,
-                { color: theme.text, borderColor: theme.border },
-              ]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.secondaryButton, { borderColor: theme.border }]}
-                onPress={closeImageModal}
-              >
-                <Text
-                  style={[styles.secondaryButtonText, { color: theme.text }]}
-                >
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.primaryButton,
-                  { backgroundColor: theme.accent },
-                ]}
-                onPress={confirmImageSelection}
-              >
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    { color: theme.accentText },
-                  ]}
-                >
-                  Attach
-                </Text>
-      <Modal visible={isImageModalVisible} animationType="fade" onRequestClose={closeImageModal} statusBarTranslucent>
         {isRequestingCameraPermission ? (
-          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
+          <View
+            style={[
+              styles.fullScreenContainer,
+              { backgroundColor: theme.background },
+            ]}
+          >
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={theme.accent} />
-              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Requesting camera access…</Text>
+              <Text
+                style={[styles.permissionMessage, { color: theme.mutedText }]}
+              >
+                Requesting camera access…
+              </Text>
             </View>
           </View>
         ) : cameraPermissionStatus === 'granted' ? (
           <View style={styles.fullScreenContainer}>
-            <Camera ref={cameraRef} style={styles.fullScreenCamera} cameraType={CameraType.Back} />
+            <Camera
+              ref={cameraRef}
+              style={styles.fullScreenCamera}
+              cameraType={CameraType.Back}
+            />
             <View style={styles.cameraOverlay}>
               <View style={styles.cameraTopBar}>
                 {cameraError ? (
-                  <View style={[styles.errorBanner, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
-                    <Text style={[styles.cameraErrorText, { color: '#ffffff' }]}>{cameraError}</Text>
+                  <View
+                    style={[
+                      styles.errorBanner,
+                      { backgroundColor: 'rgba(0,0,0,0.6)' },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.cameraErrorText, { color: '#ffffff' }]}
+                    >
+                      {cameraError}
+                    </Text>
                   </View>
                 ) : null}
               </View>
-              <View style={[styles.cameraBottomBar, { paddingBottom: safeAreaInsets.bottom + 20 }]}>
-                <Pressable 
-                  style={[styles.cameraNativeButton, { backgroundColor: 'rgba(0,0,0,0.4)' }]} 
+              <View
+                style={[
+                  styles.cameraBottomBar,
+                  { paddingBottom: safeAreaInsets.bottom + 20 },
+                ]}
+              >
+                <Pressable
+                  style={[
+                    styles.cameraNativeButton,
+                    { backgroundColor: 'rgba(0,0,0,0.4)' },
+                  ]}
                   onPress={closeImageModal}
                 >
                   <Text style={styles.cameraNativeButtonText}>Cancel</Text>
@@ -524,22 +514,54 @@ function AppContent(): JSX.Element {
             </View>
           </View>
         ) : (
-          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
-            <View style={[styles.permissionDeniedContainer, { backgroundColor: theme.card }]}>
-              <Text style={[styles.modalTitle, { color: theme.text }]}>Camera Access Required</Text>
-              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Camera access is required to capture a delivery photo.</Text>
-              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Enable permissions in your device settings and try again.</Text>
+          <View
+            style={[
+              styles.fullScreenContainer,
+              { backgroundColor: theme.background },
+            ]}
+          >
+            <View
+              style={[
+                styles.permissionDeniedContainer,
+                { backgroundColor: theme.card },
+              ]}
+            >
+              <Text style={[styles.modalTitle, { color: theme.text }]}>
+                Camera Access Required
+              </Text>
+              <Text
+                style={[styles.permissionMessage, { color: theme.mutedText }]}
+              >
+                Camera access is required to capture a delivery photo.
+              </Text>
+              <Text
+                style={[styles.permissionMessage, { color: theme.mutedText }]}
+              >
+                Enable permissions in your device settings and try again.
+              </Text>
               {cameraError ? (
-                <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
+                <Text
+                    style={[styles.cameraErrorText, { color: theme.accent }]}
+                >
+                  {cameraError}
+                </Text>
               ) : null}
-              <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={closeImageModal}>
-                <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Close</Text>
+              <Pressable
+                style={[styles.primaryButton, { backgroundColor: theme.accent }]}
+                onPress={closeImageModal}
+              >
+                <Text
+                  style={[styles.primaryButtonText, { color: theme.accentText }]}
+                >
+                  Close
+                </Text>
               </Pressable>
             </View>
           </View>
         )}
       </Modal>
 
+      {/* SIGNATURE MODAL */}
       <Modal
         visible={isSignatureModalVisible}
         animationType="slide"
@@ -598,41 +620,41 @@ function AppContent(): JSX.Element {
                 { color: theme.text, borderColor: theme.border },
               ]}
             />
-         <View style={styles.container}>
-      {draftSignatureData && !isLoading ? (
-        <View style={styles.preview}>
-          <Image
-            resizeMode="contain"
-            style={{ width: 335, height: 114 }}
-            source={{ uri: draftSignatureData }}
-          />
-        </View>
-      ) : (
-        <View style={styles.signatureCanvasContainer}>
 
-        <SignatureCanvas
-        key={signatureKey}
-        ref={ref}
-        onEnd={handleEnd}
-        onOK={handleSignature}
-        onEmpty={handleEmpty}
-        onClear={handleClear}
-        onError={handleError}
-        autoClear={false}
-        descriptionText=""
-        clearText=""
-        confirmText=""
-        penColor="#000000"
-        backgroundColor="rgba(255,255,255,0)"
-        webviewProps={{
-          cacheEnabled: true,
-          androidLayerType: "hardware",
-        }}
-      />
-      </View>
+            <View style={styles.container}>
+              {draftSignatureData && !isLoadingSignature ? (
+                <View style={styles.preview}>
+                  <Image
+                    resizeMode="contain"
+                    style={{ width: 335, height: 114 }}
+                    source={{ uri: draftSignatureData }}
+                  />
+                </View>
+              ) : (
+                <View style={styles.signatureCanvasContainer}>
+                  <SignatureCanvas
+                    key={signatureKey}
+                    ref={signatureRef}
+                    onEnd={handleEnd}
+                    onOK={handleSignature}
+                    onEmpty={handleEmpty}
+                    onClear={handleClear}
+                    onError={handleError}
+                    autoClear={false}
+                    descriptionText=""
+                    clearText=""
+                    confirmText=""
+                    penColor="#000000"
+                    backgroundColor="rgba(255,255,255,0)"
+                    webviewProps={{
+                      cacheEnabled: true,
+                      androidLayerType: 'hardware',
+                    }}
+                  />
+                </View>
+              )}
+            </View>
 
-      )}
-    </View>
             <Pressable
               style={[
                 styles.secondaryButton,
@@ -652,7 +674,6 @@ function AppContent(): JSX.Element {
 }
 
 const styles = StyleSheet.create({
-
   signatureCanvasContainer: {
     width: '100%',
     height: 280,
@@ -871,25 +892,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
   },
-  signatureCanvasWrapper: {
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    height: 280,
-    position: 'relative',
-  },
-  signatureCanvasBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 0,
-  },
-  signatureCanvas: {
-    flex: 1,
-    zIndex: 1,
-  },
   preview: {
     width: '100%',
     height: 280,
@@ -898,8 +900,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 12,
   },
- 
 });
 
-export default App;
 export default App;
