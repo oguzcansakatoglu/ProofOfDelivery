@@ -99,11 +99,4 @@ To learn more about React Native, take a look at the following resources:
 # License
 
 This project is released under the [MIT License](./LICENSE).
-
-
-
-git stash
-git fetch origin path
-git checkout -b path origin/path
-git pull
-git stash apply
+ 
