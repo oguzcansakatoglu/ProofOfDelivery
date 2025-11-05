@@ -3,6 +3,7 @@
  */
 
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -15,6 +16,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import React, { useMemo, useRef, useState } from 'react';
+import { Camera, CameraType } from 'react-native-camera-kit';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
@@ -62,7 +65,6 @@ function AppContent(): JSX.Element {
 
   const [note, setNote] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageModalVisible, setImageModalVisible] = useState(false);
   const [isSignatureModalVisible, setSignatureModalVisible] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
@@ -78,21 +80,117 @@ function AppContent(): JSX.Element {
     () => Boolean(signatureData && signatureData.length > 0),
     [signatureData],
   );
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [isRequestingCameraPermission, setIsRequestingCameraPermission] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [hasSignature, setHasSignature] = useState(false);
+  const cameraRef = useRef<Camera | null>(null);
 
-  const openImageModal = () => {
-    setImageUrlInput(imageUri ?? '');
+  const openImageModal = useCallback(() => {
+    setCameraError(null);
+    setCameraPermissionStatus('unknown');
     setImageModalVisible(true);
-  };
+  }, []);
 
   const closeImageModal = () => {
     setImageModalVisible(false);
+    setCameraPermissionStatus('unknown');
+    setCameraError(null);
+    setIsRequestingCameraPermission(false);
   };
 
-  const confirmImageSelection = () => {
-    const trimmed = imageUrlInput.trim();
-    setImageUri(trimmed.length > 0 ? trimmed : null);
-    setImageModalVisible(false);
-  };
+  useEffect(() => {
+    if (!isImageModalVisible) {
+      return;
+    }
+
+    let isActive = true;
+
+    const requestPermission = async () => {
+      setIsRequestingCameraPermission(true);
+      try {
+        // Check if permission methods exist
+        if (typeof Camera.requestDeviceCameraAuthorization !== 'function') {
+          // If methods don't exist, assume we have permission and let the Camera component handle it
+          if (isActive) {
+            setCameraPermissionStatus('granted');
+            setCameraError(null);
+            setIsRequestingCameraPermission(false);
+          }
+          return;
+        }
+
+        // Check existing permission status
+        let existingStatus;
+        if (typeof Camera.checkDeviceCameraAuthorizationStatus === 'function') {
+          existingStatus = await Camera.checkDeviceCameraAuthorizationStatus();
+        }
+
+        if (!isActive) {
+          return;
+        }
+
+        // If already granted, we're done
+        if (existingStatus === true || existingStatus === 'authorized' || existingStatus === 'granted') {
+          setCameraError(null);
+          setCameraPermissionStatus('granted');
+          setIsRequestingCameraPermission(false);
+          return;
+        }
+
+        // Request permission
+        const requestedStatus = await Camera.requestDeviceCameraAuthorization();
+
+        if (!isActive) {
+          return;
+        }
+
+        // Handle the response
+        if (requestedStatus === true || requestedStatus === 'authorized' || requestedStatus === 'granted') {
+          setCameraError(null);
+          setCameraPermissionStatus('granted');
+        } else {
+          setCameraError('Camera access was denied. Enable it in Settings.');
+          setCameraPermissionStatus('denied');
+        }
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        console.error('Camera permission error:', error);
+        // On error, try to show camera anyway - it might handle permissions itself
+        setCameraPermissionStatus('granted');
+        setCameraError(null);
+      } finally {
+        if (isActive) {
+          setIsRequestingCameraPermission(false);
+        }
+      }
+    };
+
+    void requestPermission();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isImageModalVisible]);
+
+  const handleCapturePhoto = useCallback(async () => {
+    try {
+      const capturedImage = await cameraRef.current?.capture?.();
+      if (capturedImage?.uri) {
+        setImageUri(capturedImage.uri);
+        setImageModalVisible(false);
+        setCameraPermissionStatus('unknown');
+        setCameraError(null);
+      } else {
+        setCameraError('No image data was returned.');
+      }
+    } catch (error) {
+      setCameraError('Failed to capture photo. Please try again.');
+    }
+  }, []);
 
   const handleRemoveImage = () => {
     setImageUri(null);
@@ -211,7 +309,9 @@ function AppContent(): JSX.Element {
               Photo attachment
             </Text>
             <Pressable
-              onPress={openImageModal}
+              onPress={() => {
+                void openImageModal();
+              }}
               style={[styles.primaryButton, { backgroundColor: theme.accent }]}
             >
               <Text
@@ -385,10 +485,59 @@ function AppContent(): JSX.Element {
                 >
                   Attach
                 </Text>
+      <Modal visible={isImageModalVisible} animationType="fade" onRequestClose={closeImageModal} statusBarTranslucent>
+        {isRequestingCameraPermission ? (
+          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={theme.accent} />
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Requesting camera access…</Text>
+            </View>
+          </View>
+        ) : cameraPermissionStatus === 'granted' ? (
+          <View style={styles.fullScreenContainer}>
+            <Camera ref={cameraRef} style={styles.fullScreenCamera} cameraType={CameraType.Back} />
+            <View style={styles.cameraOverlay}>
+              <View style={styles.cameraTopBar}>
+                {cameraError ? (
+                  <View style={[styles.errorBanner, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
+                    <Text style={[styles.cameraErrorText, { color: '#ffffff' }]}>{cameraError}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <View style={[styles.cameraBottomBar, { paddingBottom: safeAreaInsets.bottom + 20 }]}>
+                <Pressable 
+                  style={[styles.cameraNativeButton, { backgroundColor: 'rgba(0,0,0,0.4)' }]} 
+                  onPress={closeImageModal}
+                >
+                  <Text style={styles.cameraNativeButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.captureButtonNative}
+                  onPress={() => {
+                    void handleCapturePhoto();
+                  }}
+                >
+                  <View style={styles.captureButtonInner} />
+                </Pressable>
+                <View style={styles.cameraNativeButton} />
+              </View>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
+            <View style={[styles.permissionDeniedContainer, { backgroundColor: theme.card }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Camera Access Required</Text>
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Camera access is required to capture a delivery photo.</Text>
+              <Text style={[styles.permissionMessage, { color: theme.mutedText }]}>Enable permissions in your device settings and try again.</Text>
+              {cameraError ? (
+                <Text style={[styles.cameraErrorText, { color: theme.accent }]}>{cameraError}</Text>
+              ) : null}
+              <Pressable style={[styles.primaryButton, { backgroundColor: theme.accent }]} onPress={closeImageModal}>
+                <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>Close</Text>
               </Pressable>
             </View>
           </View>
-        </View>
+        )}
       </Modal>
 
       <Modal
@@ -610,38 +759,88 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  modalOverlay: {
+  fullScreenContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: '#000',
+  },
+  fullScreenCamera: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  cameraOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
+  cameraTopBar: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+  },
+  errorBanner: {
+    padding: 12,
+    borderRadius: 8,
+  },
+  cameraBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+  },
+  cameraNativeButton: {
+    width: 80,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    borderRadius: 8,
   },
-  modalContent: {
-    width: '100%',
-    maxWidth: 360,
+  cameraNativeButtonText: {
+    color: '#ffffff',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  captureButtonNative: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#ffffff',
+  },
+  captureButtonInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#ffffff',
+  },
+  permissionDeniedContainer: {
+    margin: 24,
+    padding: 24,
     borderRadius: 20,
-    padding: 20,
     gap: 16,
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
   },
-  modalDescription: {
-    fontSize: 14,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingContainer: {
+    alignItems: 'center',
     gap: 12,
+    paddingVertical: 24,
+  },
+  permissionMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  cameraErrorText: {
+    fontSize: 14,
+    textAlign: 'center',
   },
   signatureModalContainer: {
     flex: 1,
@@ -702,4 +901,5 @@ const styles = StyleSheet.create({
  
 });
 
+export default App;
 export default App;
