@@ -2,7 +2,6 @@
  * Proof of Delivery single page application.
  */
 
-import React, { useMemo, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -15,10 +14,12 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
+
 import SignatureCanvas from 'react-native-signature-canvas';
 
 const lightTheme = {
@@ -52,10 +53,7 @@ function App(): JSX.Element {
   );
 }
 
-type SignatureCanvasRef = {
-  readSignature: () => void;
-  clearSignature: () => void;
-};
+ 
 
 function AppContent(): JSX.Element {
   const safeAreaInsets = useSafeAreaInsets();
@@ -74,7 +72,7 @@ function AppContent(): JSX.Element {
   const [signatureName, setSignatureName] = useState('');
   const [draftSignatureName, setDraftSignatureName] = useState('');
 
-  const signatureRef = useRef<SignatureCanvasRef | null>(null);
+  const [signatureKey, setSignatureKey] = useState(0);
 
   const hasSignature = useMemo(
     () => Boolean(signatureData && signatureData.length > 0),
@@ -125,37 +123,39 @@ function AppContent(): JSX.Element {
     [draftSignatureData],
   );
 
-  const signatureCanvasStyle = useMemo(
-    () => `
-      .m-signature-pad--footer {
-        display: none;
-      }
-      body, html {
-        background: transparent;
-      }
-      .m-signature-pad {
-        box-shadow: none;
-        border: none;
-      }
-    `,
-    [],
-  );
+   
+ 
 
-  const handleSignatureOK = (signature: string) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const ref = useRef();
+
+  const handleSignature = (signature) => {
+    console.log('Signature captured:', signature);
     setDraftSignatureData(signature);
+    setIsLoading(false);
   };
 
-  const handleSignatureEnd = () => {
-    signatureRef.current?.readSignature();
-  };
-
-  const handleSignatureCleared = () => {
+  const handleEmpty = () => {
+    console.log('Signature is empty');
     setDraftSignatureData(null);
+    setIsLoading(false);
   };
 
-  const handleSignatureClear = () => {
-    signatureRef.current?.clearSignature();
+  const handleClear = () => {
+    console.log('Signature cleared');
     setDraftSignatureData(null);
+    setIsLoading(false);
+    setSignatureKey(prev => prev + 1); // Force remount
+  };
+
+  const handleError = (error) => {
+    console.error('Signature pad error:', error);
+    setIsLoading(false);
+  };
+
+  const handleEnd = () => {
+    setIsLoading(true);
+    ref.current?.readSignature();
   };
 
   return (
@@ -282,7 +282,7 @@ function AppContent(): JSX.Element {
               source={{ uri: signatureData }}
               style={[
                 styles.signaturePreview,
-                { borderColor: theme.border, backgroundColor: theme.card },
+                { borderColor: theme.border, backgroundColor: "white" },
               ]}
               resizeMode="contain"
             />
@@ -449,33 +449,47 @@ function AppContent(): JSX.Element {
                 { color: theme.text, borderColor: theme.border },
               ]}
             />
-            <View
-              style={[
-                styles.signatureCanvasWrapper,
-                { borderColor: theme.border, backgroundColor: theme.card },
-              ]}
-            >
-              <SignatureCanvas
-                ref={ref => {
-                  signatureRef.current = ref;
-                }}
-                onOK={handleSignatureOK}
-                onEnd={handleSignatureEnd}
-                onClear={handleSignatureCleared}
-                autoClear={false}
-                webStyle={signatureCanvasStyle}
-                backgroundColor="transparent"
-                dataURL={draftSignatureData ?? undefined}
-                penColor={theme.text}
-                style={styles.signatureCanvas}
-              />
-            </View>
+         <View style={styles.container}>
+      {draftSignatureData && !isLoading ? (
+        <View style={styles.preview}>
+          <Image
+            resizeMode="contain"
+            style={{ width: 335, height: 114 }}
+            source={{ uri: draftSignatureData }}
+          />
+        </View>
+      ) : (
+        <View style={styles.signatureCanvasContainer}>
+
+        <SignatureCanvas
+        key={signatureKey}
+        ref={ref}
+        onEnd={handleEnd}
+        onOK={handleSignature}
+        onEmpty={handleEmpty}
+        onClear={handleClear}
+        onError={handleError}
+        autoClear={false}
+        descriptionText=""
+        clearText=""
+        confirmText=""
+        penColor="#000000"
+        backgroundColor="rgba(255,255,255,0)"
+        webviewProps={{
+          cacheEnabled: true,
+          androidLayerType: "hardware",
+        }}
+      />
+      </View>
+
+      )}
+    </View>
             <Pressable
               style={[
                 styles.secondaryButton,
                 { borderColor: theme.border, alignSelf: 'flex-start' },
               ]}
-              onPress={handleSignatureClear}
+              onPress={handleClear}
             >
               <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
                 Clear signature
@@ -489,6 +503,13 @@ function AppContent(): JSX.Element {
 }
 
 const styles = StyleSheet.create({
+
+  signatureCanvasContainer: {
+    width: '100%',
+    height: 280,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   container: {
     flex: 1,
   },
@@ -656,10 +677,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     height: 280,
+    position: 'relative',
+  },
+  signatureCanvasBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
   signatureCanvas: {
     flex: 1,
+    zIndex: 1,
   },
+  preview: {
+    width: '100%',
+    height: 280,
+    backgroundColor: '#F8F8F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+ 
 });
 
 export default App;
