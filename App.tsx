@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Image,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StatusBar,
@@ -16,12 +15,15 @@ import {
   View,
   useColorScheme,
 } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
 import { Camera, CameraType } from 'react-native-camera-kit';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
+
+import SignatureCanvas from 'react-native-signature-canvas';
 
 const lightTheme = {
   background: '#f4f6fb',
@@ -54,86 +56,7 @@ function App(): JSX.Element {
   );
 }
 
-type Point = { x: number; y: number };
-type Stroke = { id: number; points: Point[] };
-
-type SignaturePadProps = {
-  theme: typeof lightTheme;
-  onSignatureChange?: (hasSignature: boolean) => void;
-};
-
-function SignaturePad({ theme, onSignatureChange }: SignaturePadProps) {
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const strokeId = useRef(0);
-
-  useEffect(() => {
-    const hasSignature = strokes.some(stroke => stroke.points.length > 0);
-    onSignatureChange?.(hasSignature);
-  }, [strokes, onSignatureChange]);
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: event => {
-          const { locationX, locationY } = event.nativeEvent;
-          strokeId.current += 1;
-          const newStroke: Stroke = {
-            id: strokeId.current,
-            points: [{ x: locationX, y: locationY }],
-          };
-          setStrokes(prev => [...prev, newStroke]);
-        },
-        onPanResponderMove: event => {
-          const { locationX, locationY } = event.nativeEvent;
-          setStrokes(prev => {
-            if (prev.length === 0) {
-              return prev;
-            }
-            const updated = [...prev];
-            const currentStroke = updated[updated.length - 1];
-            updated[updated.length - 1] = {
-              ...currentStroke,
-              points: [...currentStroke.points, { x: locationX, y: locationY }],
-            };
-            return updated;
-          });
-        },
-      }),
-    [],
-  );
-
-  const handleClear = () => {
-    setStrokes([]);
-  };
-
-  return (
-    <View>
-      <View
-        style={[styles.signatureCanvas, { backgroundColor: theme.background, borderColor: theme.border }]}
-        {...panResponder.panHandlers}
-      >
-        {strokes.length === 0 ? (
-          <Text style={[styles.signaturePlaceholder, { color: theme.mutedText }]}>
-            Sign inside the box
-          </Text>
-        ) : null}
-        {strokes.map(stroke =>
-          stroke.points.map((point, index) => (
-            <View
-              key={`${stroke.id}-${index}`}
-              style={[styles.signaturePoint, { backgroundColor: theme.text, left: point.x - 2, top: point.y - 2 }]}
-            />
-          )),
-        )}
-      </View>
-      <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={handleClear}>
-        <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Clear signature</Text>
-      </Pressable>
-    </View>
-  );
-}
+ 
 
 function AppContent(): JSX.Element {
   const safeAreaInsets = useSafeAreaInsets();
@@ -143,6 +66,20 @@ function AppContent(): JSX.Element {
   const [note, setNote] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [isSignatureModalVisible, setSignatureModalVisible] = useState(false);
+  const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [draftSignatureData, setDraftSignatureData] = useState<string | null>(
+    null,
+  );
+  const [signatureName, setSignatureName] = useState('');
+  const [draftSignatureName, setDraftSignatureName] = useState('');
+
+  const [signatureKey, setSignatureKey] = useState(0);
+
+  const hasSignature = useMemo(
+    () => Boolean(signatureData && signatureData.length > 0),
+    [signatureData],
+  );
   const [cameraPermissionStatus, setCameraPermissionStatus] = useState<'unknown' | 'granted' | 'denied'>('unknown');
   const [isRequestingCameraPermission, setIsRequestingCameraPermission] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -259,6 +196,66 @@ function AppContent(): JSX.Element {
     setImageUri(null);
   };
 
+  const openSignatureModal = () => {
+    setDraftSignatureData(signatureData);
+    setDraftSignatureName(signatureName);
+    setSignatureModalVisible(true);
+  };
+
+  const closeSignatureModal = () => {
+    setSignatureModalVisible(false);
+  };
+
+  const saveSignature = () => {
+    if (!draftSignatureData || draftSignatureData.length === 0) {
+      return;
+    }
+
+    setSignatureData(draftSignatureData);
+    setSignatureName(draftSignatureName.trim());
+    setSignatureModalVisible(false);
+  };
+
+  const signatureHasContent = useMemo(
+    () => Boolean(draftSignatureData && draftSignatureData.length > 0),
+    [draftSignatureData],
+  );
+
+   
+ 
+
+  const [isLoading, setIsLoading] = useState(false);
+  const ref = useRef();
+
+  const handleSignature = (signature) => {
+    console.log('Signature captured:', signature);
+    setDraftSignatureData(signature);
+    setIsLoading(false);
+  };
+
+  const handleEmpty = () => {
+    console.log('Signature is empty');
+    setDraftSignatureData(null);
+    setIsLoading(false);
+  };
+
+  const handleClear = () => {
+    console.log('Signature cleared');
+    setDraftSignatureData(null);
+    setIsLoading(false);
+    setSignatureKey(prev => prev + 1); // Force remount
+  };
+
+  const handleError = (error) => {
+    console.error('Signature pad error:', error);
+    setIsLoading(false);
+  };
+
+  const handleEnd = () => {
+    setIsLoading(true);
+    ref.current?.readSignature();
+  };
+
   return (
     <View
       style={[
@@ -275,11 +272,22 @@ function AppContent(): JSX.Element {
         keyboardShouldPersistTap="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.heading, { color: theme.text }]}>Proof of delivery</Text>
-        <Text style={[styles.subheading, { color: theme.mutedText }]}>Capture a note, photo, or signature</Text>
+        <Text style={[styles.heading, { color: theme.text }]}>
+          Proof of delivery
+        </Text>
+        <Text style={[styles.subheading, { color: theme.mutedText }]}>
+          Capture a note, photo, or signature
+        </Text>
 
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Text style={[styles.label, { color: theme.mutedText }]}>Delivery note</Text>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.label, { color: theme.mutedText }]}>
+            Delivery note
+          </Text>
           <TextInput
             placeholder="Add important delivery details..."
             placeholderTextColor={theme.mutedText}
@@ -290,16 +298,25 @@ function AppContent(): JSX.Element {
           />
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Photo attachment</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Photo attachment
+            </Text>
             <Pressable
               onPress={() => {
                 void openImageModal();
               }}
               style={[styles.primaryButton, { backgroundColor: theme.accent }]}
             >
-              <Text style={[styles.primaryButtonText, { color: theme.accentText }]}>
+              <Text
+                style={[styles.primaryButtonText, { color: theme.accentText }]}
+              >
                 {imageUri ? 'Change image' : 'Add image'}
               </Text>
             </Pressable>
@@ -307,39 +324,167 @@ function AppContent(): JSX.Element {
 
           {imageUri ? (
             <View style={styles.imagePreviewWrapper}>
-              <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
-              <Pressable style={[styles.secondaryButton, { borderColor: theme.border }]} onPress={handleRemoveImage}>
-                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Remove image</Text>
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.imagePreview}
+                resizeMode="cover"
+              />
+              <Pressable
+                style={[styles.secondaryButton, { borderColor: theme.border }]}
+                onPress={handleRemoveImage}
+              >
+                <Text
+                  style={[styles.secondaryButtonText, { color: theme.text }]}
+                >
+                  Remove image
+                </Text>
               </Pressable>
             </View>
           ) : (
-            <Text style={[styles.emptyStateText, { color: theme.mutedText }]}>No image attached</Text>
+            <Text style={[styles.emptyStateText, { color: theme.mutedText }]}>
+              No image attached
+            </Text>
           )}
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Signature</Text>
-          <Text style={[styles.signatureHint, { color: theme.mutedText }]}>Use your finger to sign below.</Text>
-          <SignaturePad theme={theme} onSignatureChange={setHasSignature} />
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Signature
+          </Text>
+          <Text style={[styles.signatureHint, { color: theme.mutedText }]}>
+            Capture a full-screen signature.
+          </Text>
+          <Pressable
+            onPress={openSignatureModal}
+            style={[styles.primaryButton, { backgroundColor: theme.accent }]}
+          >
+            <Text
+              style={[styles.primaryButtonText, { color: theme.accentText }]}
+            >
+              {hasSignature ? 'Edit signature' : 'Capture signature'}
+            </Text>
+          </Pressable>
+          <Text
+            style={[
+              styles.signatureStatus,
+              { color: hasSignature ? theme.text : theme.mutedText },
+            ]}
+          >
+            {hasSignature ? 'Signature captured' : 'No signature captured'}
+          </Text>
+          {hasSignature && signatureData ? (
+            <Image
+              source={{ uri: signatureData }}
+              style={[
+                styles.signaturePreview,
+                { borderColor: theme.border, backgroundColor: "white" },
+              ]}
+              resizeMode="contain"
+            />
+          ) : null}
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Summary</Text>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Summary
+          </Text>
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>Note characters</Text>
-            <Text style={[styles.summaryValue, { color: theme.text }]}>{note.trim().length}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>
+              Note characters
+            </Text>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>
+              {note.trim().length}
+            </Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>Image attached</Text>
-            <Text style={[styles.summaryValue, { color: theme.text }]}>{imageUri ? 'Yes' : 'No'}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>
+              Image attached
+            </Text>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>
+              {imageUri ? 'Yes' : 'No'}
+            </Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>Signature captured</Text>
-            <Text style={[styles.summaryValue, { color: theme.text }]}>{hasSignature ? 'Yes' : 'No'}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>
+              Signature captured
+            </Text>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>
+              {hasSignature ? 'Yes' : 'No'}
+            </Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={[styles.summaryLabel, { color: theme.mutedText }]}>
+              Signature name
+            </Text>
+            <Text style={[styles.summaryValue, { color: theme.text }]}>
+              {signatureName.length > 0 ? signatureName : 'Not provided'}
+            </Text>
           </View>
         </View>
       </ScrollView>
 
+      <Modal
+        visible={isImageModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={closeImageModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Attach image
+            </Text>
+            <Text style={[styles.modalDescription, { color: theme.mutedText }]}>
+              Paste an image URL to attach it to this proof.
+            </Text>
+            <TextInput
+              value={imageUrlInput}
+              onChangeText={setImageUrlInput}
+              placeholder="https://example.com/photo.jpg"
+              placeholderTextColor={theme.mutedText}
+              style={[
+                styles.modalInput,
+                { color: theme.text, borderColor: theme.border },
+              ]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.secondaryButton, { borderColor: theme.border }]}
+                onPress={closeImageModal}
+              >
+                <Text
+                  style={[styles.secondaryButtonText, { color: theme.text }]}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  { backgroundColor: theme.accent },
+                ]}
+                onPress={confirmImageSelection}
+              >
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    { color: theme.accentText },
+                  ]}
+                >
+                  Attach
+                </Text>
       <Modal visible={isImageModalVisible} animationType="fade" onRequestClose={closeImageModal} statusBarTranslucent>
         {isRequestingCameraPermission ? (
           <View style={[styles.fullScreenContainer, { backgroundColor: theme.background }]}>
@@ -394,11 +539,126 @@ function AppContent(): JSX.Element {
           </View>
         )}
       </Modal>
+
+      <Modal
+        visible={isSignatureModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closeSignatureModal}
+      >
+        <View
+          style={[
+            styles.signatureModalContainer,
+            {
+              backgroundColor: theme.background,
+              paddingTop: safeAreaInsets.top + 16,
+              paddingBottom: safeAreaInsets.bottom + 24,
+            },
+          ]}
+        >
+          <View style={styles.signatureModalHeader}>
+            <Pressable onPress={closeSignatureModal}>
+              <Text
+                style={[
+                  styles.signatureModalAction,
+                  { color: theme.mutedText },
+                ]}
+              >
+                Cancel
+              </Text>
+            </Pressable>
+            <Text style={[styles.signatureModalTitle, { color: theme.text }]}>
+              Capture signature
+            </Text>
+            <Pressable onPress={saveSignature} disabled={!signatureHasContent}>
+              <Text
+                style={[
+                  styles.signatureModalAction,
+                  {
+                    color: theme.accent,
+                    opacity: signatureHasContent ? 1 : 0.5,
+                  },
+                ]}
+              >
+                Save
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.signatureModalBody}>
+            <Text style={[styles.signatureHint, { color: theme.mutedText }]}>
+              Use your finger to sign below.
+            </Text>
+            <TextInput
+              value={draftSignatureName}
+              onChangeText={setDraftSignatureName}
+              placeholder="Signer name"
+              placeholderTextColor={theme.mutedText}
+              style={[
+                styles.signatureNameInput,
+                { color: theme.text, borderColor: theme.border },
+              ]}
+            />
+         <View style={styles.container}>
+      {draftSignatureData && !isLoading ? (
+        <View style={styles.preview}>
+          <Image
+            resizeMode="contain"
+            style={{ width: 335, height: 114 }}
+            source={{ uri: draftSignatureData }}
+          />
+        </View>
+      ) : (
+        <View style={styles.signatureCanvasContainer}>
+
+        <SignatureCanvas
+        key={signatureKey}
+        ref={ref}
+        onEnd={handleEnd}
+        onOK={handleSignature}
+        onEmpty={handleEmpty}
+        onClear={handleClear}
+        onError={handleError}
+        autoClear={false}
+        descriptionText=""
+        clearText=""
+        confirmText=""
+        penColor="#000000"
+        backgroundColor="rgba(255,255,255,0)"
+        webviewProps={{
+          cacheEnabled: true,
+          androidLayerType: "hardware",
+        }}
+      />
+      </View>
+
+      )}
+    </View>
+            <Pressable
+              style={[
+                styles.secondaryButton,
+                { borderColor: theme.border, alignSelf: 'flex-start' },
+              ]}
+              onPress={handleClear}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
+                Clear signature
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+
+  signatureCanvasContainer: {
+    width: '100%',
+    height: 280,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   container: {
     flex: 1,
   },
@@ -445,6 +705,9 @@ const styles = StyleSheet.create({
   signatureHint: {
     fontSize: 14,
   },
+  signatureStatus: {
+    fontSize: 14,
+  },
   primaryButton: {
     borderRadius: 999,
     paddingHorizontal: 16,
@@ -489,23 +752,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  signatureCanvas: {
-    height: 160,
-    borderWidth: 1,
+  signaturePreview: {
+    width: '100%',
+    height: 140,
+    marginTop: 8,
     borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  signaturePlaceholder: {
-    fontSize: 14,
-  },
-  signaturePoint: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    position: 'absolute',
+    borderWidth: 1,
   },
   fullScreenContainer: {
     flex: 1,
@@ -590,5 +842,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
+  signatureModalContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    gap: 24,
+  },
+  signatureModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  signatureModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  signatureModalAction: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signatureModalBody: {
+    flex: 1,
+    gap: 16,
+  },
+  signatureNameInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+  },
+  signatureCanvasWrapper: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    height: 280,
+    position: 'relative',
+  },
+  signatureCanvasBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  signatureCanvas: {
+    flex: 1,
+    zIndex: 1,
+  },
+  preview: {
+    width: '100%',
+    height: 280,
+    backgroundColor: '#F8F8F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+ 
 });
+
+export default App;
 export default App;
